@@ -17,6 +17,9 @@ import functools
 
 from typing import Any
 import os 
+import sys 
+
+sys.setrecursionlimit(5000)
 
 def gen_set_of_edges(n_domain_size): 
     output = {}  
@@ -123,23 +126,27 @@ def gen_S_sets(H_matrices, range_to_min_cover):
     output = {}
     num_ranges = len(H_matrices[0])
     for i in range(num_ranges): 
-        for j in range(num_ranges): 
-            print(i,j)
+        for j in range(i, num_ranges): 
             alpha = sum(range_to_min_cover[i])
             beta = sum(range_to_min_cover[j])
-            tmp = [-1 for _ in range(alpha)] 
-            for a in range(alpha): 
-                for b in range(beta): 
-                    row1 = H_matrices[a][i]
-                    row2 = H_matrices[b][j]
-                    if sum([c * d for c,d in zip(row1,row2)]) == 1: 
-                        tmp[a] = b
-            
+            lst1 = np.nonzero(range_to_min_cover[i])[0]
+            lst2 = np.nonzero(range_to_min_cover[j])[0]
+
+            matrix = [[lst1[i] == lst2[j] for j in range(beta)] for i in range(alpha)] 
+            matrix_t = list(map(list, zip(*matrix)))
+
             if (alpha,beta) in output: 
-                output[(alpha,beta)][tuple(tmp)].append((i,j))
+                output[(alpha,beta)][tuple(map(tuple, matrix))].append((i,j))
             else: 
                 output[(alpha,beta)] = defaultdict(list)
-                output[(alpha,beta)][tuple(tmp)].append((i,j))
+                output[(alpha,beta)][tuple(map(tuple, matrix))].append((i,j))
+            
+            if i != j: 
+                if (beta,alpha) in output: 
+                    output[(beta,alpha)][tuple(map(tuple, matrix_t))].append((j,i))
+                else: 
+                    output[(beta,alpha)] = defaultdict(list)
+                    output[(beta,alpha)][tuple(map(tuple, matrix_t))].append((j,i))
     
     return output 
 
@@ -160,27 +167,6 @@ def gen_T_sets(H_matrices, E_matrix):
         output[j] = tmp
     return output
 
-# def gen_T_sets(H_matrices, E_matrix, range_to_min_cover): 
-#     output = defaultdict(list)
-#     n = len(H_matrices) 
-#     num_ranges = len(H_matrices[0])
-#     N = len(E_matrix) 
-
-#     for i in range(num_ranges): 
-#         alpha = sum(range_to_min_cover[i])
-#         output[alpha].append(i)
-
-#     for j in range(n): 
-#         tmp = []
-#         for alpha in range(num_ranges): 
-#             for x in range(N): 
-#                 row1 = H_matrices[j][alpha]
-#                 row2 = E_matrix[x]
-#                 if sum([a * b for a,b in zip(row1,row2)]) == 1: 
-#                     tmp.append((alpha,x))
-#         output[j] = tmp
-#     return output
-
 def compute_qeq_extra_vars(S, qeq_leakage, t, curr_num): 
     extra_vars = 0
     extra_constraints = 0
@@ -190,17 +176,11 @@ def compute_qeq_extra_vars(S, qeq_leakage, t, curr_num):
             A = qeq_leakage[(i,j)]
             a = len(A) 
             b = len(A[0])
-            tmp = [-1 for _ in range(a)]
-
-            for k in range(a): 
-                for l in range(b): 
-                    if A[k][l]: 
-                        tmp[k] = l
             
-            output[(i,j)] = [curr_num + 1 + x for x in range(len(S[(a,b)][tuple(tmp)]))]
-            extra_vars += len(S[(a,b)][tuple(tmp)])
-            extra_constraints += 2 * len(S[(a,b)][tuple(tmp)]) + 1
-            curr_num += len(S[(a,b)][tuple(tmp)])
+            output[(i,j)] = [curr_num + 1 + x for x in range(len(S[(a,b)][tuple(map(tuple,A))]))]
+            extra_vars += len(S[(a,b)][tuple(map(tuple,A))])
+            extra_constraints += 2 * len(S[(a,b)][tuple(map(tuple,A))]) + 1
+            curr_num += len(S[(a,b)][tuple(map(tuple,A))])
 
     return extra_vars, extra_constraints, output 
 
@@ -413,7 +393,11 @@ class OSTLeakageSolver:
             D_extra_vars[i] = [(num_vars + num_R_extra_vars + i * amo_D_extra_vars + j) for j in range(1, amo_D_extra_vars + 1)]
 
         print("gen s sets")
+        start = time.perf_counter_ns()
         S = gen_S_sets(self.list_of_H_matrix, self.range_to_min_cover)
+        end = time.perf_counter_ns()
+        print(f"Gen S Sets: {(end - start) / (10 ** 9)} s")
+
 
         print("gen t sets")
         T = gen_T_sets(self.list_of_H_matrix, self.E_matrix)
@@ -485,16 +469,8 @@ class OSTLeakageSolver:
                 A = qeq_leakage[(i,j)]
                 a = len(A) 
                 b = len(A[0])
-                tmp = [-1 for _ in range(a)]
-
-                for k in range(a): 
-                    for l in range(b): 
-                        if A[k][l]: 
-                            tmp[k] = l 
                 
-                matches = S[(a,b)][tuple(tmp)]
-
-                print(i,j,len(matches))
+                matches = S[(a,b)][tuple(map(tuple,A))]
                 row = []
                 col = [] 
 
@@ -588,6 +564,8 @@ def run_one_instance(t_number_of_queries, n_domain_size, r_number_of_records, da
     queries = distribution.sample(t_number_of_queries) 
     print("QUERIES")
     # queries = [11,4,88,82,75,34,25,37,29,84,1,11,95,82,47,36]
+    # queries = [2,30,11,23,25,21,23,6,11,14,25,10,23,19,5,13,12,15,29,13,7,31,18,25,29,15,26,30,30,4,14,22]
+    # print(queries)
     # Generating a random D matrix (using uniform distribution)
     D_matrix = [[0 for _ in range(n_domain_size)] for _ in range(r_number_of_records)] 
 
@@ -597,9 +575,10 @@ def run_one_instance(t_number_of_queries, n_domain_size, r_number_of_records, da
         uniform_samples = Uniform(n_domain_size).sample(r_number_of_records)
     # uniform_samples = [1,3,2,0]
     # uniform_samples = [11,13,8,6,11,10,10,2,9,14,8,3,11,12,12,5]
+    # uniform_samples = [28,25,26,8,15,20,8,2,2,9,11,28,2,3,2,29,10,26,29,0,22,30,17,29,13,10,23,15,22,30,9,28]
     for i in range(r_number_of_records): 
         D_matrix[i][uniform_samples[i]] = 1
-    print(uniform_samples)
+    # print(uniform_samples)
     # print(queries, uniform_samples)
     # Compute the OST Leakage from Q_matrix and D_matrix 
     qeq_leakage = gen_qeq_leakage(queries, range_to_min_cover) 
@@ -634,9 +613,9 @@ def run_one_instance(t_number_of_queries, n_domain_size, r_number_of_records, da
 
 def main():
     f = open("fixed_density_t100_n10_r10.txt", "w")
-    t_list = [16]
-    n_list = [16]
-    r_list = [16]
+    t_list = [32]
+    n_list = [32]
+    r_list = [32]
     data_dist = "uniform" #uniform or fixed_density for now
     query_dist = "uniform" #uniform or zipf
     num_iters = 1
@@ -667,6 +646,7 @@ def main():
 if __name__ == "__main__":
     start = time.perf_counter_ns()
     # compute_hypergraph_info(n_domain_size,set_of_ranges)
+    print("HELLO")
     main()
     # gen_set_of_edges(8)
     # print(compute_D_extra_info(200))
