@@ -156,16 +156,20 @@ def gen_T_sets(H_matrices, E_matrix):
     num_ranges = len(H_matrices[0])
     N = len(E_matrix) 
 
-    for j in range(n): 
-        tmp = []
-        for alpha in range(num_ranges): 
+    for alpha in range(num_ranges): 
+        edge_mapping = {} 
+        for j in range(n): 
+            tmp = []
             for x in range(N): 
                 row1 = H_matrices[j][alpha]
                 row2 = E_matrix[x]
-                if sum([a * b for a,b in zip(row1,row2)]) == 1: 
-                    tmp.append((alpha,x))
-        output[j] = tmp
-    return output
+                if sum([a*b for a,b in zip(row1,row2)]) == 1: 
+                    tmp.append(x) 
+            if len(tmp) > 0: 
+                edge_mapping[j] = tmp 
+        output[alpha] = edge_mapping 
+    
+    return output 
 
 def compute_qeq_extra_vars(S, qeq_leakage, t, curr_num): 
     extra_vars = 0
@@ -184,22 +188,29 @@ def compute_qeq_extra_vars(S, qeq_leakage, t, curr_num):
 
     return extra_vars, extra_constraints, output 
 
-def compute_rid_extra_vars(T, rid_leakage, t, curr_num): 
+def compute_rid_extra_vars(T, query_sequence, rid_leakage, t, curr_num): 
     extra_vars = 0
     extra_constraints = 0
     output = {}
     for i in range(t): 
         B = rid_leakage[i] 
+        query_num = query_sequence[i]
+
         for j in range(len(B)): 
             for k in range(len(B[0])): 
                 if B[j][k]: 
-                    output[(i,j,k)] = [curr_num + 1 + x for x in range(len(T[j]))]
-                    extra_vars += len(T[j])
-                    extra_constraints += 2 * len(T[j]) + 1
-                    curr_num += len(T[j])
+                    output[(i,j,k)] = [curr_num + 1 + x for x in range(len(T[query_num][j]))]
+                    # xtra_vars += len(T[query_num][j])
+                    # extra_vars += 0 
+                    # extra_constraints += 2 * len(T[j]) + 1
+                    extra_constraints += 1 
+                    # curr_num += len(T[j]) 
+
                 else: 
                     output[(i,j,k)] = []
-                    extra_constraints += len(T[j])
+                    extra_constraints += len(T[query_num][j])
+    # print("hello")
+    # print(extra_vars, extra_constraints)
     return extra_vars, extra_constraints, output 
 
 def write_leakage_clauses_to_file(row,col,extra_vars,indicator_bit, file): 
@@ -223,6 +234,8 @@ def parse_output_file(file_name,D_matrix_mapping, n, r, num_vars):
         while 1: 
             line = next(file).split(" ")
             if line[0] == 's': 
+                if line[1] == "UNSATISFIABLE\n": 
+                    return -1
                 break
         line = next(file).split(" ")
         while line[0] == 'v': 
@@ -238,6 +251,31 @@ def parse_output_file(file_name,D_matrix_mapping, n, r, num_vars):
             output[i][j] = tmp[D_matrix_mapping[j][i]]
 
     return output
+
+def parse_range_output_file(file_name,t, num_ranges, num_vars):
+    tmp = {}
+    boolean_output = []
+    query_output= []
+    with open(file_name) as file: 
+        while 1: 
+            line = next(file).split(" ")
+            if line[0] == 's': 
+                if line[1] == "UNSATISFIABLE\n":
+                    return -1, -1
+                break
+        line = next(file).split(" ")
+        while line[0] == 'v': 
+            for i in range(1, len(line)): 
+                if (int(line[i]) > num_vars): 
+                    break
+                if int(int(line[i])) > 0: 
+                    boolean_output.append(abs(int(line[i])))
+                    query_output.append((abs(int(line[i])) - 1) % num_ranges)
+            line = next(file).split(" ")
+    # print(query_output)
+    # print(boolean_output)
+    assert(len(boolean_output) == t) 
+    return boolean_output, query_output
 
 def write_clauses_to_file(clauses, file): 
     for clause in clauses: 
@@ -363,21 +401,22 @@ class OSTLeakageSolver:
                     self.set_of_ranges.append((i,j))
 
         self.set_of_edges,self.range_to_min_cover,self.E_matrix, self.list_of_H_matrix = compute_hypergraph_info(self.n_domain_size,self.set_of_ranges)
-
-    def solve(self,qeq_leakage,rid_leakage):
-
+    
+    def compute_all_possible_range_matrices(self,qeq_leakage): 
+    
         # Preparing all the boolean variables for cadical 
 
         amo_R_extra_vars, amo_R_extra_constraints = compute_amo_extra_info(len(self.set_of_ranges))
         amo_D_extra_vars, amo_D_extra_constraints = compute_amo_extra_info(self.n_domain_size)
 
         num_R_vars = self.t_number_of_queries * len(self.set_of_ranges)
-        num_D_vars = self.n_domain_size * self.r_number_of_records
+        # num_D_vars = self.n_domain_size * self.r_number_of_records
 
-        num_vars = num_R_vars + num_D_vars
+        # num_vars = num_R_vars + num_D_vars
+        num_vars = num_R_vars 
 
         num_R_extra_vars = self.t_number_of_queries * amo_R_extra_vars
-        num_D_extra_vars = self.r_number_of_records * amo_D_extra_vars
+        # um_D_extra_vars = self.r_number_of_records * amo_D_extra_vars
 
         R_matrix =  [[0 for _ in range(len(self.set_of_ranges))] for _ in range(self.t_number_of_queries)]
         for i in range(self.t_number_of_queries): 
@@ -388,36 +427,32 @@ class OSTLeakageSolver:
         for i in range(self.t_number_of_queries):
             R_extra_vars[i] = [(num_vars + i * amo_R_extra_vars + j) for j in range(1, amo_R_extra_vars + 1)]
 
-        D_extra_vars = {} 
-        for i in range(self.r_number_of_records):
-            D_extra_vars[i] = [(num_vars + num_R_extra_vars + i * amo_D_extra_vars + j) for j in range(1, amo_D_extra_vars + 1)]
-
         print("gen s sets")
         start = time.perf_counter_ns()
         S = gen_S_sets(self.list_of_H_matrix, self.range_to_min_cover)
         end = time.perf_counter_ns()
         print(f"Gen S Sets: {(end - start) / (10 ** 9)} s")
 
-
-        print("gen t sets")
-        T = gen_T_sets(self.list_of_H_matrix, self.E_matrix)
-
-        num_qeq_extra_vars, num_qeq_constraints, qeq_extra_vars = compute_qeq_extra_vars(S, qeq_leakage, self.t_number_of_queries, num_vars + num_R_extra_vars + num_D_extra_vars)
-        num_rid_extra_vars, num_rid_constraints, rid_extra_vars = compute_rid_extra_vars(T, rid_leakage, self.t_number_of_queries, num_vars + num_R_extra_vars + num_D_extra_vars + num_qeq_extra_vars)
+        num_qeq_extra_vars, num_qeq_constraints, qeq_extra_vars = compute_qeq_extra_vars(S, qeq_leakage, self.t_number_of_queries, num_vars + num_R_extra_vars)
+        # num_rid_extra_vars, num_rid_constraints, rid_extra_vars = compute_rid_extra_vars(T, rid_leakage, self.t_number_of_queries, num_vars + num_R_extra_vars + num_D_extra_vars + num_qeq_extra_vars)
         
         num_R_constraints = self.t_number_of_queries * (amo_R_extra_constraints + 1)
-        num_D_constraints = self.r_number_of_records * (amo_D_extra_constraints + 1)
+        # num_D_constraints = self.r_number_of_records * (amo_D_extra_constraints + 1)
 
-        num_extra_vars = num_R_extra_vars + num_D_extra_vars + num_qeq_extra_vars + num_rid_extra_vars 
+        # num_extra_vars = num_R_extra_vars + num_D_extra_vars + num_qeq_extra_vars + num_rid_extra_vars 
+        num_extra_vars = num_R_extra_vars + num_qeq_extra_vars 
         num_total_vars = num_vars + num_extra_vars 
-        num_total_constraints = num_R_constraints + num_D_constraints + num_qeq_constraints + num_rid_constraints
+
+        # num_total_constraints = num_R_constraints + num_D_constraints + num_qeq_constraints + num_rid_constraints
+        num_total_constraints = num_R_constraints + num_qeq_constraints
 
         # num_total_vars = num_vars + num_R_extra_vars + num_D_extra_vars + num_qeq_extra_vars
         # num_total_constraints = num_R_constraints + num_D_constraints + num_qeq_constraints
 
         # print(num_R_vars, num_D_vars, num_R_extra_vars, num_D_extra_vars, num_qeq_extra_vars, num_rid_extra_vars)
         print("num constraints")
-        print(num_R_constraints, num_D_constraints, num_qeq_constraints, num_rid_constraints) 
+        # print(num_R_constraints, num_qeq_constraints)
+        # print(num_R_constraints, num_D_constraints, num_qeq_constraints, num_rid_constraints) 
 
         # Construct query matrix.
         #print("Constructing Q...")
@@ -438,28 +473,6 @@ class OSTLeakageSolver:
         end = time.perf_counter_ns()
         
         print(f"Elapsed: {(end - start) / (10 ** 9)} s")
-        print("Constructing D...")
-        start = time.perf_counter_ns()
-        D_matrix = [[0 for _ in range(self.r_number_of_records)] for _ in range(self.n_domain_size)]
-        for i in range(self.n_domain_size): 
-            for j in range(self.r_number_of_records): 
-                D_matrix[i][j] = num_R_vars + i*self.r_number_of_records + j + 1
-
-        for i in range(self.r_number_of_records):
-            column = []
-            for j in range(self.n_domain_size):
-                column.append(D_matrix[j][i])
-            
-            # exactly one of these are true 
-            write_pbeq_clause(column, D_extra_vars[i], f) 
-
-        # R_matrix_extra_vars = {} 
-        # num_prev_vars = num_vars + num_Q_extra_vars + num_D_extra_vars
-        # for i in range(R_num_ones): 
-        #     R_matrix_extra_vars[i] =[(num_prev_vars + self.n_domain_size* i + j) for j in range(1,self.n_domain_size + 1)]
-
-        end = time.perf_counter_ns()
-        print(f"Elapsed: {(end - start) / (10 ** 9)} s")
 
         print("Constructing QEQ Leakage constraint...")
         # print(qeq_leakage)
@@ -479,38 +492,171 @@ class OSTLeakageSolver:
                     col.append(R_matrix[j][match[1]])
                 
                 write_leakage_clauses_to_file(row,col,qeq_extra_vars[(i,j)],1,f)
-
-        print("Constructing RID Leakage constraint...")
-
-        for i in range(len(rid_leakage)): 
-            B = rid_leakage[i]
-            for j in range(len(B)): 
-                matches = T[j]
-                # print(matches)
-                for k in range(len(B[0])): 
-                    row = []
-                    col = []
-                    for match in matches: 
-                        row.append(D_matrix[match[1]][k])
-                        col.append(R_matrix[i][match[0]])
-                    
-                    write_leakage_clauses_to_file(row,col,rid_extra_vars[(i,j,k)],B[j][k], f)
-
  
         f.close()
         end = time.perf_counter_ns()
         
         print(f"Elapsed: {(end - start) / (10 ** 9)} s")
+
+        output = [] 
+
         print("Solving ...")
         start = time.perf_counter_ns() 
         cmd = './build/cadical ' +  self.file_name + ' > testing.txt'
         os.system(cmd) 
+        boolean_output, tmp = parse_range_output_file('testing.txt', self.t_number_of_queries, len(self.set_of_ranges), num_R_vars)
 
-        recovered_D_matrix = parse_output_file('testing.txt', D_matrix, self.n_domain_size, self.r_number_of_records, num_vars)
+        while tmp != -1: # there are potentially more solutions 
+            output.append(boolean_output) 
+
+            with open('test.cnf','r') as ff:
+                data = ff.readlines() 
+            
+            header = data[0].split(" ")
+            header[3] = str(int(header[3]) + 1)
+            data[0] = " ".join(header)
+            data.append(" ".join(str(-1 * x) for x in boolean_output) + " 0\n")
+
+            with open('test.cnf','w') as ff: 
+                ff.writelines(data)
+            
+            os.system(cmd) 
+            boolean_output, tmp = parse_range_output_file('testing.txt', self.t_number_of_queries, len(self.set_of_ranges), num_R_vars)
+            print(tmp)
+
         end = time.perf_counter_ns()
-        
         print(f"Elapsed: {(end - start) / (10 ** 9)} s")
-        return recovered_D_matrix
+        print(len(output))
+        return output
+
+
+    def solve(self,boolean_outputs,rid_leakage):
+
+        # Preparing all the boolean variables for cadical 
+
+        # amo_R_extra_vars, amo_R_extra_constraints = compute_amo_extra_info(len(self.set_of_ranges))
+        amo_D_extra_vars, amo_D_extra_constraints = compute_amo_extra_info(self.n_domain_size)
+
+        # num_R_vars = self.t_number_of_queries * len(self.set_of_ranges)
+        num_D_vars = self.n_domain_size * self.r_number_of_records
+
+        # num_vars = num_R_vars + num_D_vars
+        num_vars = num_D_vars 
+
+        # num_R_extra_vars = self.t_number_of_queries * amo_R_extra_vars
+        num_D_extra_vars = self.r_number_of_records * amo_D_extra_vars
+
+        D_extra_vars = {} 
+        for i in range(self.r_number_of_records):
+            D_extra_vars[i] = [(num_vars + i * amo_D_extra_vars + j) for j in range(1, amo_D_extra_vars + 1)]
+
+        print("gen t sets")
+        start = time.perf_counter_ns()
+        T = gen_T_sets(self.list_of_H_matrix, self.E_matrix)
+        end = time.perf_counter_ns()
+        print(f"Gen T Sets: {(end - start) / (10 ** 9)} s")
+
+        
+        for boolean_output in boolean_outputs: 
+            query_sequence = [(x - 1) % len(self.set_of_ranges) for x in boolean_output]
+
+            print("GUESSED SEQUENCE")
+            print(query_sequence) 
+            # num_qeq_extra_vars, num_qeq_constraints, qeq_extra_vars = compute_qeq_extra_vars(S, qeq_leakage, self.t_number_of_queries, num_vars + num_R_extra_vars)
+            
+            num_rid_extra_vars, num_rid_constraints, rid_extra_vars = compute_rid_extra_vars(T, query_sequence, rid_leakage, self.t_number_of_queries, num_vars + num_D_extra_vars)
+            # print(num_rid_extra_vars, num_rid_constraints, rid_extra_vars)
+
+            # num_R_constraints = self.t_number_of_queries * (amo_R_extra_constraints + 1)
+            num_D_constraints = self.r_number_of_records * (amo_D_extra_constraints + 1)
+
+            # num_extra_vars = num_R_extra_vars + num_D_extra_vars + num_qeq_extra_vars + num_rid_extra_vars 
+            num_extra_vars = num_D_extra_vars + num_rid_extra_vars
+            num_total_vars = num_vars + num_extra_vars 
+
+            # num_total_constraints = num_R_constraints + num_D_constraints + num_qeq_constraints + num_rid_constraints
+            num_total_constraints = num_D_constraints + num_rid_constraints
+
+            # num_total_vars = num_vars + num_R_extra_vars + num_D_extra_vars + num_qeq_extra_vars
+            # num_total_constraints = num_R_constraints + num_D_constraints + num_qeq_constraints
+
+            # print(num_R_vars, num_D_vars, num_R_extra_vars, num_D_extra_vars, num_qeq_extra_vars, num_rid_extra_vars)
+            # print(num_R_constraints, num_D_constraints, num_qeq_constraints, num_rid_constraints) 
+
+            # Construct query matrix.
+            #print("Constructing Q...")
+            f = open(self.file_name, "w+")
+
+            f.write('p cnf' + " " + str(num_total_vars) + " " + str(num_total_constraints) + " \n")
+            # f.write('p cnf' + " " + str(num_total_vars_prev) + " " + str(num_Q_constraints_prev + num_D_constraints + num_R_constraints) + " \n")
+
+            # print("Constructing Q...")
+            # start = time.perf_counter_ns()
+            
+            # for i in range(self.t_number_of_queries): 
+            #     R_vars = []
+            #     for j in range(len(self.set_of_ranges)): 
+            #         R_vars.append(R_matrix[i][j])
+            #     write_pbeq_clause(R_vars,R_extra_vars[i],f)
+
+            # end = time.perf_counter_ns()
+            
+            # print(f"Elapsed: {(end - start) / (10 ** 9)} s")
+            print("Constructing D...")
+            start = time.perf_counter_ns()
+            D_matrix = [[0 for _ in range(self.r_number_of_records)] for _ in range(self.n_domain_size)]
+            for i in range(self.n_domain_size): 
+                for j in range(self.r_number_of_records): 
+                    D_matrix[i][j] = i*self.r_number_of_records + j + 1
+
+            for i in range(self.r_number_of_records):
+                column = []
+                for j in range(self.n_domain_size):
+                    column.append(D_matrix[j][i])
+                
+                # exactly one of these are true 
+                write_pbeq_clause(column, D_extra_vars[i], f) 
+
+            # R_matrix_extra_vars = {} 
+            # num_prev_vars = num_vars + num_Q_extra_vars + num_D_extra_vars
+            # for i in range(R_num_ones): 
+            #     R_matrix_extra_vars[i] =[(num_prev_vars + self.n_domain_size* i + j) for j in range(1,self.n_domain_size + 1)]
+
+            end = time.perf_counter_ns()
+            print(f"Elapsed: {(end - start) / (10 ** 9)} s")
+
+            for i in range(len(rid_leakage)): 
+                B = rid_leakage[i]
+                for j in range(len(B)): 
+                    matches = T[query_sequence[i]][j]
+                    # print(matches)
+                    for k in range(len(B[0])): 
+                        points = [D_matrix[x][k] for x in matches]
+                        # print("points")
+                        # print([str(x) for x in points])
+                        if B[j][k]: 
+                            f.write(" ".join([str(x) for x in points]) + " 0\n")
+                        else: 
+                            for point in points: 
+                                f.write(str(-1 * point) + " 0\n")
+    
+            f.close()
+            end = time.perf_counter_ns()
+            
+            # print(f"Elapsed: {(end - start) / (10 ** 9)} s")
+            # print("Solving ...")
+            start = time.perf_counter_ns() 
+            cmd = './build/cadical ' +  self.file_name + ' > testing.txt'
+            os.system(cmd) 
+
+            recovered_D_matrix = parse_output_file('testing.txt', D_matrix, self.n_domain_size, self.r_number_of_records, num_vars)
+
+            if recovered_D_matrix != -1: 
+            # end = time.perf_counter_ns()
+            
+            # print(f"Elapsed: {(end - start) / (10 ** 9)} s")
+                print(recovered_D_matrix)
+                return recovered_D_matrix
 
 def compute_mae(data,recovered,domain_size): 
     errors = np.absolute([float(recovered[x] - data[x])/domain_size for x in range(len(data))])
@@ -563,9 +709,13 @@ def run_one_instance(t_number_of_queries, n_domain_size, r_number_of_records, da
 
     queries = distribution.sample(t_number_of_queries) 
     print("QUERIES")
+    # queries = [6,22,21,8,24,20,26,24]
+    # queries = [14, 29, 28, 16, 28, 31, 30, 4]
+    queries = [38,59,85,96,13,52,36,39,55,102,35,56,16,50,114,130]
     # queries = [11,4,88,82,75,34,25,37,29,84,1,11,95,82,47,36]
+    # queries = [58,132,61,1,123,15,103,57,45,121,50,5,4,122,54,80]
     # queries = [2,30,11,23,25,21,23,6,11,14,25,10,23,19,5,13,12,15,29,13,7,31,18,25,29,15,26,30,30,4,14,22]
-    # print(queries)
+    print(queries)
     # Generating a random D matrix (using uniform distribution)
     D_matrix = [[0 for _ in range(n_domain_size)] for _ in range(r_number_of_records)] 
 
@@ -592,7 +742,10 @@ def run_one_instance(t_number_of_queries, n_domain_size, r_number_of_records, da
         file_name = "test.cnf"
     )
 
-    recovered_D_matrix = ostsolver.solve(qeq_leakage = qeq_leakage, rid_leakage = rid_leakage)
+    # recovered_D_matrix = ostsolver.solve(qeq_leakage = qeq_leakage, rid_leakage = rid_leakage)
+
+    tmp = ostsolver.compute_all_possible_range_matrices(qeq_leakage) 
+    recovered_D_matrix = ostsolver.solve(tmp, rid_leakage)
 
     D_matrix = np.array(D_matrix)
     recovered_D_matrix = np.array(recovered_D_matrix)
