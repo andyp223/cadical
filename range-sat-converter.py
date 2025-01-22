@@ -466,6 +466,14 @@ def main():
 if __name__ == "__main__":
     start = time.perf_counter_ns()
     main()
+<<<<<<< HEAD
     
+=======
+    # print(compute_D_extra_info(200))
+    # run_one_instance(100,100,100,"fixed_density",'uniform',1)
+    
+    print(compute_mae([49,28,50,55,75,95,26,71,19,99],[97,97,97,97,97,95,98,97,99,95],100))
+    print(compute_mae([3,4,80,34,67,25,17,92,5,77],[8,9,100,100,100,100,4,100,9,100],100))
+>>>>>>> 17ccb132ce98b702de8b6fae7f3184782a0da978
     end = time.perf_counter_ns()
     print(f"Elapsed: {(end - start) / (10 ** 9)} s")

@@ -1,5 +1,9 @@
 build
 makefile
 test.cnf
+<<<<<<< HEAD
 testing.txt
 pkl
+=======
+testing.txt
+>>>>>>> 17ccb132ce98b702de8b6fae7f3184782a0da978
