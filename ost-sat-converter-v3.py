@@ -68,6 +68,7 @@ def gen_range_to_min_cover(set_of_ranges, n_domain_size):
     return output  
 
 def compute_hypergraph_info(n_domain_size, set_of_ranges):
+
     s = 2*n_domain_size - 1 
     set_of_edges = gen_set_of_edges(n_domain_size) 
     range_to_min_cover = gen_range_to_min_cover(set_of_ranges, n_domain_size) 
@@ -711,7 +712,7 @@ def run_one_instance(t_number_of_queries, n_domain_size, r_number_of_records, da
     print("QUERIES")
     # queries = [6,22,21,8,24,20,26,24]
     # queries = [14, 29, 28, 16, 28, 31, 30, 4]
-    queries = [38,59,85,96,13,52,36,39,55,102,35,56,16,50,114,130]
+    # queries = [38,59,85,96,13,52,36,39,55,102,35,56,16,50,114,130]
     # queries = [11,4,88,82,75,34,25,37,29,84,1,11,95,82,47,36]
     # queries = [58,132,61,1,123,15,103,57,45,121,50,5,4,122,54,80]
     # queries = [2,30,11,23,25,21,23,6,11,14,25,10,23,19,5,13,12,15,29,13,7,31,18,25,29,15,26,30,30,4,14,22]
@@ -798,7 +799,6 @@ def main():
 
 if __name__ == "__main__":
     start = time.perf_counter_ns()
-    # compute_hypergraph_info(n_domain_size,set_of_ranges)
     print("HELLO")
     main()
     # gen_set_of_edges(8)

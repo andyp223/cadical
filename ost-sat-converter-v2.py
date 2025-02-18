@@ -613,15 +613,9 @@ def run_one_instance(t_number_of_queries, n_domain_size, r_number_of_records, da
 
 def main():
     f = open("fixed_density_t100_n10_r10.txt", "w")
-<<<<<<< HEAD
-    t_list = [8]
-    n_list = [8]
-    r_list = [8]
-=======
     t_list = [32]
     n_list = [32]
     r_list = [32]
->>>>>>> 17ccb132ce98b702de8b6fae7f3184782a0da978
     data_dist = "uniform" #uniform or fixed_density for now
     query_dist = "uniform" #uniform or zipf
     num_iters = 1
